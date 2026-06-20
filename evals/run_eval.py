@@ -56,9 +56,55 @@ def matches(gold_rows: list[tuple] | None, pred_rows: list[tuple] | None) -> boo
 
 # ---------- Implement these (Phase 5) ----------------------------------
 
+def _sqls_from_history(history: list[dict]) -> list[str]:
+    """Ordered SQL strings across iterations (generate + each revise)."""
+    return [h["sql"] for h in history if isinstance(h, dict) and "sql" in h]
+
+
 def eval_one(question: dict, agent_url: str) -> dict:
     """Score one question. Return a dict capturing per-iteration correctness."""
-    raise NotImplementedError("Phase 5")
+    db_id = question["db_id"]
+    gold_ok, gold_rows, _ = run_sql(db_id, question["gold_sql"])
+
+    try:
+        resp = httpx.post(
+            agent_url,
+            json={"question": question["question"], "db": db_id},
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:  # noqa: BLE001 -- HTTP boundary: record and move on
+        return {
+            "db_id": db_id,
+            "question": question["question"],
+            "iterations": 0,
+            "correct_per_iter": [],
+            "final_correct": False,
+            "final_sql": "",
+            "agent_ok": False,
+            "error": f"{type(e).__name__}: {e}",
+        }
+
+    sqls = _sqls_from_history(data.get("history", []))
+    if not sqls and data.get("sql"):
+        sqls = [data["sql"]]
+
+    correct_per_iter: list[bool] = []
+    for sql in sqls:
+        ok, rows, _ = run_sql(db_id, sql)
+        correct_per_iter.append(bool(gold_ok and ok and matches(gold_rows, rows)))
+
+    return {
+        "db_id": db_id,
+        "question": question["question"],
+        "iterations": data.get("iterations", len(sqls)),
+        "correct_per_iter": correct_per_iter,
+        "final_correct": correct_per_iter[-1] if correct_per_iter else False,
+        "final_sql": data.get("sql", ""),
+        "agent_ok": bool(data.get("ok", False)),
+        "error": data.get("error"),
+    }
 
 
 def summarize(results: list[dict]) -> dict:
@@ -70,7 +116,25 @@ def summarize(results: list[dict]) -> dict:
     The agent stopped emitting; whatever it had at termination is what
     would have been served had we polled at iteration k.
     """
-    raise NotImplementedError("Phase 5")
+    total = len(results)
+    overall = sum(1 for r in results if r["final_correct"]) / total if total else 0.0
+
+    n_iters = max((len(r["correct_per_iter"]) for r in results), default=0)
+    per_iteration: list[float] = []
+    for k in range(n_iters):
+        correct = 0
+        for r in results:
+            cpi = r["correct_per_iter"]
+            if not cpi:
+                continue  # agent never produced SQL -> wrong at every iteration
+            correct += int(cpi[k] if k < len(cpi) else cpi[-1])  # carry-forward
+        per_iteration.append(correct / total if total else 0.0)
+
+    return {
+        "n": total,
+        "overall_pass_rate": overall,
+        "pass_rate_per_iteration": per_iteration,
+    }
 
 
 # ---------- Main (provided) --------------------------------------------

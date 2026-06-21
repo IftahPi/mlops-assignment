@@ -31,16 +31,16 @@ from agent.schema import render_schema
 from agent.trace import format_step, logger
 
 # Total generate + revise calls before the loop is forced to stop.
-# 3-5 is a reasonable range; tune it as part of Phase 3.
-MAX_ITERATIONS = 3
+# 3-5 is a reasonable range; tune it as part of Phase 3. Env-overridable for experiments / Phase 6.
+MAX_ITERATIONS = int(os.environ.get("AGENT_MAX_ITERATIONS", "3"))
 
 # generate + verify run at 0.0 so the first attempt and the reviewer are deterministic
 # (stable, reproducible iter-0 baseline → the per-iteration pass rate cleanly attributes any
 # lift to the loop). revise gets a little temperature so a failed query isn't "revised" into
-# the identical query (self-reinforcing 0.0 loop). Re-tune against the 30B in Phase 6.
-GENERATE_TEMPERATURE = 0.0
-VERIFY_TEMPERATURE = 0.0
-REVISE_TEMPERATURE = 0.2
+# the identical query (self-reinforcing 0.0 loop). All env-overridable for experiments / Phase 6.
+GENERATE_TEMPERATURE = float(os.environ.get("AGENT_GENERATE_TEMPERATURE", "0.0"))
+VERIFY_TEMPERATURE = float(os.environ.get("AGENT_VERIFY_TEMPERATURE", "0.0"))
+REVISE_TEMPERATURE = float(os.environ.get("AGENT_REVISE_TEMPERATURE", "0.2"))
 
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
@@ -142,6 +142,7 @@ def verify_node(state: AgentState) -> dict:
     response = llm(VERIFY_TEMPERATURE).invoke([
         ("system", prompts.VERIFY_SYSTEM),
         ("user", prompts.VERIFY_USER.format(
+            schema=state.schema,
             question=state.question,
             sql=state.sql,
             result=rendered,

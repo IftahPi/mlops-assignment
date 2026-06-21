@@ -49,8 +49,11 @@ If none of these apply and the result genuinely answers the question, mark it ok
 Respond with ONLY a JSON object, nothing else:
 {"ok": true or false, "issue": "short, specific reason naming the red flag; empty string if ok"}"""
 
-# Available placeholders: {question}, {sql}, {result}
-VERIFY_USER = """Question: {question}
+# Available placeholders: {schema}, {question}, {sql}, {result}
+VERIFY_USER = """Schema:
+{schema}
+
+Question: {question}
 
 SQL that was run:
 {sql}

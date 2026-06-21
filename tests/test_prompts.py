@@ -14,10 +14,11 @@ def test_generate_sql_user_substitutes_schema_and_question():
 
 
 def test_verify_user_substitutes_its_inputs():
-    out = prompts.VERIFY_USER.format(question="Q1", sql="SELECT 1", result="OK: 1 rows.")
-    assert "Q1" in out
-    assert "SELECT 1" in out
-    assert "OK: 1 rows." in out
+    out = prompts.VERIFY_USER.format(
+        schema="SCHEMA_V", question="Q1", sql="SELECT 1", result="OK: 1 rows."
+    )
+    for token in ("SCHEMA_V", "Q1", "SELECT 1", "OK: 1 rows."):
+        assert token in out
 
 
 def test_revise_user_substitutes_its_inputs():

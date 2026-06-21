@@ -1,0 +1,90 @@
+"""Pure formatter + logging configuration helper for the agent's per-step trace."""
+import logging
+import os
+import re
+
+logger = logging.getLogger("agent")
+
+
+def debug_enabled() -> bool:
+    """Read AGENT_DEBUG env var. Default is ON (True).
+
+    Return False only when the value (lowercased, stripped) is one of:
+    "0", "false", "". Otherwise True. If unset, return True (default on).
+    """
+    if "AGENT_DEBUG" not in os.environ:
+        return True
+
+    value = os.environ.get("AGENT_DEBUG", "").strip().lower()
+    if value in ("0", "false", ""):
+        return False
+    return True
+
+
+def _oneline(text: str, limit: int = 120) -> str:
+    """Collapse ALL runs of whitespace (including newlines) into single spaces.
+
+    Strip ends, and if longer than limit, truncate to limit chars and append
+    a unicode ellipsis character. Private helper.
+    """
+    # Replace all runs of whitespace with a single space
+    collapsed = re.sub(r"\s+", " ", text).strip()
+
+    if len(collapsed) > limit:
+        return collapsed[:limit] + "…"
+    return collapsed
+
+
+def format_step(node: str, update: dict) -> str:
+    """Pure function. Maps a LangGraph node's returned update dict to one emoji-prefixed summary line.
+
+    Behavior by node name:
+    - "generate_sql" → 🧭
+    - "revise" → 💭
+    - "execute" → 📊
+    - "verify" → 🔎
+    - any other node → •
+    """
+    if node == "generate_sql":
+        return f"🧭 generate_sql (iter {update.get('iteration')}) → {_oneline(update.get('sql', ''))}"
+
+    if node == "revise":
+        return f"💭 revise (iter {update.get('iteration')}) → {_oneline(update.get('sql', ''))}"
+
+    if node == "execute":
+        execution = update.get("execution")
+        if execution is None:
+            render_text = "no execution result"
+        else:
+            try:
+                render_text = execution.render()
+            except Exception:  # noqa: BLE001 - rendering an arbitrary object, fall back to str
+                render_text = str(execution)
+        return f"📊 execute → {_oneline(render_text)}"
+
+    if node == "verify":
+        if update.get("verify_ok"):
+            return "🔎 verify → ok=true"
+        return f"🔎 verify → ok=false: {_oneline(update.get('verify_issue', ''))}"
+
+    return f"• {node} → {_oneline(str(update))}"
+
+
+def configure_logging(debug: bool | None = None) -> None:
+    """Idempotent. Configure the module logger for per-step trace output.
+
+    If debug is None, use debug_enabled(). Ensure exactly one StreamHandler,
+    set a simple formatter, and set log level. Also set propagate=False
+    to avoid doubling by the root logger.
+    """
+    if debug is None:
+        debug = debug_enabled()
+
+    # Idempotent: only attach a handler the first time, so repeat calls don't stack them.
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(handler)
+
+    logger.setLevel(logging.INFO if debug else logging.WARNING)
+    logger.propagate = False

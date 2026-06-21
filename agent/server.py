@@ -6,8 +6,6 @@ Run:
 The /answer endpoint accepts {question, db, tags?} and returns the
 agent's final SQL, the result rows, and per-iteration history.
 """
-from __future__ import annotations
-
 import os
 from typing import Any
 
@@ -18,6 +16,10 @@ from pydantic import BaseModel
 load_dotenv()
 
 from agent.graph import AgentState, graph  # noqa: E402
+from agent.trace import configure_logging  # noqa: E402
+
+# Per-step trace logging in the uvicorn console (on by default; AGENT_DEBUG=0 to quiet).
+configure_logging()
 
 # Langfuse callback handler. If keys are set we initialize it; failures
 # are NOT swallowed - a misconfigured Langfuse should not silently

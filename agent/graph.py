@@ -28,10 +28,17 @@ from agent import prompts
 from agent.execution import ExecutionResult, execute_sql
 from agent.parsing import parse_verify_result
 from agent.schema import render_schema
+from agent.trace import format_step, logger
 
 # Total generate + revise calls before the loop is forced to stop.
 # 3-5 is a reasonable range; tune it as part of Phase 3.
 MAX_ITERATIONS = 3
+
+# Generation (generate_sql / revise) gets a little temperature so a failed query
+# isn't "revised" into the identical query (self-reinforcing 0.0 loops). Verify is a
+# classifier, so it stays deterministic at 0.0. Re-tune against the 30B in Phase 6.
+GENERATE_TEMPERATURE = 0.2
+VERIFY_TEMPERATURE = 0.0
 
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
@@ -55,13 +62,13 @@ class AgentState:
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
-def llm() -> ChatOpenAI:
+def llm(temperature: float = 0.0) -> ChatOpenAI:
     """Chat client pointed at VLLM_BASE_URL (your local vLLM by default)."""
     return ChatOpenAI(
         model=VLLM_MODEL,
         base_url=VLLM_BASE_URL,
         api_key=LLM_API_KEY,
-        temperature=0.0,
+        temperature=temperature,
     )
 
 
@@ -92,7 +99,7 @@ def generate_sql_node(state: AgentState) -> dict:
     This node is wired and ready; fill in GENERATE_SQL_SYSTEM / GENERATE_SQL_USER
     in prompts.py to make it produce real queries.
     """
-    response = llm().invoke([
+    response = llm(GENERATE_TEMPERATURE).invoke([
         ("system", prompts.GENERATE_SQL_SYSTEM),
         ("user", prompts.GENERATE_SQL_USER.format(
             schema=state.schema,
@@ -100,16 +107,20 @@ def generate_sql_node(state: AgentState) -> dict:
         )),
     ])
     sql = _extract_sql(response.content)
-    return {
+    update = {
         "sql": sql,
         "iteration": state.iteration + 1,
         "history": state.history + [{"node": "generate_sql", "sql": sql}],
     }
+    logger.info(format_step("generate_sql", update))
+    return update
 
 
 def execute_node(state: AgentState) -> dict:
     """Provided. Runs the SQL and stores the result."""
-    return {"execution": execute_sql(state.db_id, state.sql)}
+    update = {"execution": execute_sql(state.db_id, state.sql)}
+    logger.info(format_step("execute", update))
+    return update
 
 
 def verify_node(state: AgentState) -> dict:
@@ -126,7 +137,7 @@ def verify_node(state: AgentState) -> dict:
     in the README.
     """
     rendered = state.execution.render() if state.execution else "ERROR: no execution result"
-    response = llm().invoke([
+    response = llm(VERIFY_TEMPERATURE).invoke([
         ("system", prompts.VERIFY_SYSTEM),
         ("user", prompts.VERIFY_USER.format(
             question=state.question,
@@ -135,11 +146,13 @@ def verify_node(state: AgentState) -> dict:
         )),
     ])
     result = parse_verify_result(response.content)
-    return {
+    update = {
         "verify_ok": result.ok,
         "verify_issue": result.issue,
         "history": state.history + [{"node": "verify", "ok": result.ok, "issue": result.issue}],
     }
+    logger.info(format_step("verify", update))
+    return update
 
 
 def revise_node(state: AgentState) -> dict:
@@ -153,7 +166,7 @@ def revise_node(state: AgentState) -> dict:
     Return: {"sql": <str>, "iteration": state.iteration + 1, ...}.
     """
     rendered = state.execution.render() if state.execution else "ERROR: no execution result"
-    response = llm().invoke([
+    response = llm(GENERATE_TEMPERATURE).invoke([
         ("system", prompts.REVISE_SYSTEM),
         ("user", prompts.REVISE_USER.format(
             schema=state.schema,
@@ -164,11 +177,13 @@ def revise_node(state: AgentState) -> dict:
         )),
     ])
     sql = _extract_sql(response.content)
-    return {
+    update = {
         "sql": sql,
         "iteration": state.iteration + 1,
         "history": state.history + [{"node": "revise", "sql": sql}],
     }
+    logger.info(format_step("revise", update))
+    return update
 
 
 def route_after_verify(state: AgentState) -> str:

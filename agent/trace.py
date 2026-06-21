@@ -6,6 +6,21 @@ import re
 logger = logging.getLogger("agent")
 
 
+def langfuse_metadata(tags: dict[str, str]) -> dict[str, str | list[str]]:
+    """Build the LangGraph config 'metadata' so Langfuse records FILTERABLE trace tags.
+
+    The LangChain CallbackHandler turns metadata['langfuse_tags'] (a list of strings) into the
+    trace's tags - the chips shown in the trace LIST and filterable in the UI (needed for Phase 6).
+    Plain metadata keys, by contrast, are only visible once you open a single trace. So we keep the
+    raw key/values as metadata AND derive 'key:value' tag strings. Empty tags -> empty metadata
+    (no empty langfuse_tags key).
+    """
+    metadata: dict[str, str | list[str]] = dict(tags)
+    if tags:
+        metadata["langfuse_tags"] = [f"{key}:{value}" for key, value in tags.items()]
+    return metadata
+
+
 def debug_enabled() -> bool:
     """Read AGENT_DEBUG env var. Default is ON (True).
 

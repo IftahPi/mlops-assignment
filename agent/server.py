@@ -16,7 +16,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from agent.graph import AgentState, graph  # noqa: E402
-from agent.trace import configure_logging  # noqa: E402
+from agent.trace import configure_logging, langfuse_metadata  # noqa: E402
 
 # Per-step trace logging in the uvicorn console (on by default; AGENT_DEBUG=0 to quiet).
 configure_logging()
@@ -59,7 +59,9 @@ def answer(req: AnswerRequest) -> AnswerResponse:
     state = AgentState(question=req.question, db_id=req.db)
     config: dict[str, Any] = {
         "callbacks": [_lf_handler] if _lf_handler is not None else [],
-        "metadata": req.tags,
+        # Forward tags as Langfuse trace tags (filterable in the list, used in Phase 6),
+        # not just plain metadata. langfuse_metadata() adds the magic langfuse_tags key.
+        "metadata": langfuse_metadata(req.tags),
     }
     try:
         final = graph.invoke(state, config=config)

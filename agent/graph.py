@@ -34,11 +34,13 @@ from agent.trace import format_step, logger
 # 3-5 is a reasonable range; tune it as part of Phase 3.
 MAX_ITERATIONS = 3
 
-# Generation (generate_sql / revise) gets a little temperature so a failed query
-# isn't "revised" into the identical query (self-reinforcing 0.0 loops). Verify is a
-# classifier, so it stays deterministic at 0.0. Re-tune against the 30B in Phase 6.
-GENERATE_TEMPERATURE = 0.2
+# generate + verify run at 0.0 so the first attempt and the reviewer are deterministic
+# (stable, reproducible iter-0 baseline → the per-iteration pass rate cleanly attributes any
+# lift to the loop). revise gets a little temperature so a failed query isn't "revised" into
+# the identical query (self-reinforcing 0.0 loop). Re-tune against the 30B in Phase 6.
+GENERATE_TEMPERATURE = 0.0
 VERIFY_TEMPERATURE = 0.0
+REVISE_TEMPERATURE = 0.2
 
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
@@ -166,7 +168,7 @@ def revise_node(state: AgentState) -> dict:
     Return: {"sql": <str>, "iteration": state.iteration + 1, ...}.
     """
     rendered = state.execution.render() if state.execution else "ERROR: no execution result"
-    response = llm(GENERATE_TEMPERATURE).invoke([
+    response = llm(REVISE_TEMPERATURE).invoke([
         ("system", prompts.REVISE_SYSTEM),
         ("user", prompts.REVISE_USER.format(
             schema=state.schema,

@@ -58,7 +58,7 @@ def matches(gold_rows: list[tuple] | None, pred_rows: list[tuple] | None) -> boo
 
 def _sqls_from_history(history: list[dict]) -> list[str]:
     """Ordered SQL strings across iterations (generate + each revise)."""
-    return [h["sql"] for h in history if isinstance(h, dict) and "sql" in h]
+    return [h["sql"] for h in history if "sql" in h]
 
 
 def eval_one(question: dict, agent_url: str) -> dict:

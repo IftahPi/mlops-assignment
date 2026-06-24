@@ -46,7 +46,7 @@ app = FastAPI()
 AGENT_LATENCY = Histogram(
     "agent_request_duration_seconds",
     "End-to-end /answer handler latency (the Phase-6 SLO metric).",
-    buckets=(0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0),
+    buckets=(0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
 

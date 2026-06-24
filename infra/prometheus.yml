@@ -7,3 +7,11 @@ scrape_configs:
     static_configs:
       - targets: ['host.docker.internal:8000']
     metrics_path: /metrics
+
+  # Agent server (FastAPI on :8001) - exposes agent_request_duration_seconds,
+  # the end-to-end /answer latency that IS the Phase-6 SLO. vLLM metrics alone
+  # cannot show this (they stop at the per-LLM-call boundary).
+  - job_name: agent
+    static_configs:
+      - targets: ['host.docker.internal:8001']
+    metrics_path: /metrics

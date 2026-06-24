@@ -10,7 +10,8 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from prometheus_client import Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel
 
 load_dotenv()
@@ -40,6 +41,14 @@ if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY
 
 app = FastAPI()
 
+# End-to-end /answer latency = the Phase-6 SLO metric. Buckets straddle the 5s
+# SLO boundary so histogram_quantile is accurate right where it matters.
+AGENT_LATENCY = Histogram(
+    "agent_request_duration_seconds",
+    "End-to-end /answer handler latency (the Phase-6 SLO metric).",
+    buckets=(0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
 
 class AnswerRequest(BaseModel):
     question: str
@@ -56,12 +65,18 @@ class AnswerResponse(BaseModel):
     history: list[dict[str, Any]] = []
 
 
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/answer", response_model=AnswerResponse)
+@AGENT_LATENCY.time()
 def answer(req: AnswerRequest) -> AnswerResponse:
     # Validate db against the known set before it reaches db_path() / the schema
     # loader - db is attacker-controllable and feeds a filesystem path, so an

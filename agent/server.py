@@ -22,6 +22,12 @@ from agent.trace import configure_logging, format_run_start, langfuse_metadata, 
 # Per-step trace logging in the uvicorn console (on by default; AGENT_DEBUG=0 to quiet).
 configure_logging()
 
+# Snapshot the valid db set once at startup. Validating req.db against this (instead of
+# globbing the filesystem on every request) keeps the path-traversal guard but avoids a
+# per-request stat/glob that, under load, hits the open-FD limit and makes Path.exists()
+# silently return False - which rejected ~2/3 of valid requests with HTTP 400 (Phase 6 baseline).
+VALID_DBS = frozenset(available_dbs())
+
 # Langfuse callback handler. If keys are set we initialize it; failures
 # are NOT swallowed - a misconfigured Langfuse should not silently
 # produce zero traces.
@@ -60,7 +66,7 @@ def answer(req: AnswerRequest) -> AnswerResponse:
     # Validate db against the known set before it reaches db_path() / the schema
     # loader - db is attacker-controllable and feeds a filesystem path, so an
     # unvalidated value like "../.." would traverse out of the data directory.
-    if req.db not in available_dbs():
+    if req.db not in VALID_DBS:
         raise HTTPException(status_code=400, detail=f"unknown db: {req.db!r}")
 
     logger.info(format_run_start(req.question, req.db))

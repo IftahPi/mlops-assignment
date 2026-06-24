@@ -100,11 +100,34 @@ experiments exploring this — verify-sees-schema, cap depth, revise temperature
 
 ## 3. Hitting the SLO (Phase 6)
 
-<!-- TODO (H100): baseline latency vs SLO; iteration log entries of the form
-     "saw X → hypothesized Y → changed Z → result was W"; final numbers; honest verdict.
-     Pair: screenshots/grafana_before.png + grafana_after.png; results/eval_after_tuning.json. -->
+**SLO:** p95 end-to-end **agent** latency < 5 s at 10 RPS over a 5-minute window (1 RPS = 1 full agent
+run). The SLO metric's source of truth is the load driver (`load_test/driver.py`), which times the full
+`/answer` round-trip.
 
-_To be filled from the H100 load test + tuning iterations._
+**Observability gap (a finding in itself):** the Grafana dashboard instruments **vLLM only** —
+per-LLM-call latency, KV, queue. It has **no panel for end-to-end agent latency**, so it confirms
+serving health but cannot display the SLO metric. We therefore read the SLO off the driver and use the
+dashboard to locate *where* the time is *not* going. (Agent-level latency/queue instrumentation → §5.)
+
+**Baseline (MAX_ITERATIONS=3, + the db bug, 10 RPS, 150 s):**
+- p95 **86.5 s** (p50 29.9 s, p99 95.9 s, max 117.9 s) — **~17× over the 5 s SLO.**
+- achieved only **7.14 RPS** (could not sustain 10); **507 / 1500 ok** (http 127, client 586, timeouts 280).
+- Dashboard during the run: vLLM `running` peaked ~33, KV ~22%, **`waiting` stayed 0** — vLLM never
+  saturated. So the latency is **not** in serving; it is upstream (agent-server queuing + the sequential
+  call chain).
+
+### Iteration log
+
+**Iteration 1 — fix the correctness bug so the measurement is valid**
+- **saw:** the SLO didn't just fail, it failed catastrophically (p95 86.5 s), and only 507/1500 requests
+  succeeded — a suspiciously high error rate (HTTP 400s + "unable to open database file"). Errors return
+  instantly, so the latency distribution itself is untrustworthy.
+- **hypothesized:** a correctness bug, not (yet) a perf limit — the per-request `available_dbs()`
+  filesystem glob hits the open-FD limit under load, so `Path.exists()` returns False → valid dbs
+  rejected with 400, and FD exhaustion surfaces as "unable to open database file".
+- **changed:** snapshot the valid-db set once at startup (`VALID_DBS`) instead of globbing on every
+  request — keeps the path-traversal guard, removes the per-request filesystem dependency.
+- **result:** _<!-- fill after re-run + screenshot 2 -->_
 
 ---
 

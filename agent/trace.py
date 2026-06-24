@@ -5,6 +5,9 @@ import re
 
 logger = logging.getLogger("agent")
 
+# Horizontal rule printed once per complete trace, between questions.
+RUN_SEPARATOR = "-" * 140
+
 
 def langfuse_metadata(tags: dict[str, str]) -> dict[str, str | list[str]]:
     """Build the LangGraph config 'metadata' so Langfuse records FILTERABLE trace tags.
@@ -55,14 +58,14 @@ def format_run_start(question: str, db_id: str) -> str:
 
     Gives the trace a clear starting marker: which db and which question the agent
     is about to answer, so the generate/execute/verify/revise lines that follow have
-    context. Leads with two blank lines so each question's trace block is clearly
-    separated from the previous one in the console.
+    context. Leads with two blank lines and a horizontal rule (RUN_SEPARATOR) so
+    each complete trace is clearly divided from the previous one in the console.
 
     Both fields are passed through _oneline so a value containing newlines can't
-    forge extra log lines (log injection) - the only newlines are the two leading
-    separators.
+    forge extra log lines (log injection) - the only newlines are the structural
+    separators here.
     """
-    return f"\n\n❓ [{_oneline(db_id, limit=64)}] {_oneline(question)}"
+    return f"\n\n{RUN_SEPARATOR}\n❓ [{_oneline(db_id, limit=64)}] {_oneline(question)}"
 
 
 def format_step(node: str, update: dict) -> str:

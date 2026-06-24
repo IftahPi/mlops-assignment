@@ -27,8 +27,14 @@ def test_format_run_start_strips_newlines_from_db_id() -> None:
     """
     result = format_run_start("q", "formula_1\nINFO: forged log line")
     assert result.startswith("\n\n")
-    assert result.count("\n") == 2  # only the two separators, none injected by db_id
+    assert result.count("\n") == 3  # two blanks + rule; none injected by db_id
     assert "forged log line" in result  # collapsed onto the header line, not a new one
+
+
+def test_format_run_start_has_separator_rule() -> None:
+    """Each question is preceded by a 140-char horizontal rule dividing complete traces."""
+    result = format_run_start("q", "db")
+    assert "-" * 140 in result
 
 
 def test_format_step_verify_failure_shows_issue() -> None:

@@ -207,9 +207,22 @@ gap** — see *"Tooling: make the SLO visible"* below.
   pinned at 8.33 because the limiter is now vLLM's KV-bound capacity, not the threads. **Net: p95 cut
   ~70% but still ~4× over the 5 s SLO — and we've relocated the ceiling from the agent to vLLM's KV
   cache.** Before/after evidence: **screenshot 5** (before) vs **image 6** (after — KV pinned near
-  100%, preemptions visible). → Iteration 5: dial threads *down* to the no-preemption sweet spot
-  (~48–64) for a *stable* p95, and/or cut KV pressure per request (cap output tokens / lower
-  `--max-model-len`).
+  100%, preemptions visible).
+
+  **Why KV saturated — and why better caching is *not* the fix.** vLLM's automatic prefix caching is on
+  (`enable_prefix_caching=True`) and *working*: measured hit rate **≈52%** (`prefix_cache_hits /
+  queries` = 121M / 232M), because every prompt shares the system + schema prefix for a given `db_id`.
+  So the shared prefix is already largely deduped/cached — the blocks that *filled* KV are the
+  **per-request *unique* tokens + the growing *decode* KV, × ~100 concurrent sequences**, which prefix
+  caching does not bound. (Cache-aware *routing* doesn't apply here — a single vLLM instance, no router
+  to steer shared-prefix requests between replicas.) Also, honestly: my pre-run guess of ~65–70% KV was
+  a crude *linear* extrapolation from ~22%@~33-concurrent; near the saturation cliff it is
+  **superlinear** — as latency rises, sequences stay resident longer (Little's law), so KV climbs faster
+  than the thread count. Hence ~80–100%, not ~66%.
+
+  → Iteration 5: dial threads to the concurrency that sits *just below* the KV-preemption knee (between
+  the 40 that under-uses vLLM and the 100 that saturates it) for a *stable* p95, and/or cut KV pressure
+  per request (cap generation `max_tokens` / `--max-num-seqs`) to raise that knee.
 
 ---
 

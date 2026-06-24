@@ -19,6 +19,13 @@ def test_format_run_start_includes_db_and_question() -> None:
     assert "How many drivers are there?" in result
 
 
+def test_format_run_start_strips_newlines_from_db_id() -> None:
+    """A db_id containing newlines must not forge extra log lines (log injection)."""
+    result = format_run_start("q", "formula_1\nINFO: forged log line")
+    assert "\n" not in result
+    assert "forged log line" in result  # collapsed onto the single header line, not a new one
+
+
 def test_format_step_verify_failure_shows_issue() -> None:
     """Test that verify step failure includes the issue description."""
     result = format_step("verify", {"verify_ok": False, "verify_issue": "returned 0 rows"})

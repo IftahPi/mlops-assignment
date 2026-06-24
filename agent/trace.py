@@ -55,9 +55,10 @@ def format_run_start(question: str, db_id: str) -> str:
 
     Gives the trace a clear starting marker: which db and which question the agent
     is about to answer, so the generate/execute/verify/revise lines that follow have
-    context.
+    context. Both fields are passed through _oneline so a value containing
+    newlines can't forge extra log lines (log injection).
     """
-    return f"❓ [{db_id}] {_oneline(question)}"
+    return f"❓ [{_oneline(db_id, limit=64)}] {_oneline(question)}"
 
 
 def format_step(node: str, update: dict) -> str:

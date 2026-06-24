@@ -16,6 +16,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from agent.graph import AgentState, graph  # noqa: E402
+from agent.schema import available_dbs  # noqa: E402
 from agent.trace import configure_logging, format_run_start, langfuse_metadata, logger  # noqa: E402
 
 # Per-step trace logging in the uvicorn console (on by default; AGENT_DEBUG=0 to quiet).
@@ -56,6 +57,12 @@ def health() -> dict[str, str]:
 
 @app.post("/answer", response_model=AnswerResponse)
 def answer(req: AnswerRequest) -> AnswerResponse:
+    # Validate db against the known set before it reaches db_path() / the schema
+    # loader - db is attacker-controllable and feeds a filesystem path, so an
+    # unvalidated value like "../.." would traverse out of the data directory.
+    if req.db not in available_dbs():
+        raise HTTPException(status_code=400, detail=f"unknown db: {req.db!r}")
+
     logger.info(format_run_start(req.question, req.db))
     state = AgentState(question=req.question, db_id=req.db)
     config: dict[str, Any] = {

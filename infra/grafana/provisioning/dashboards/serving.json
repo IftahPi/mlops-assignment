@@ -31,7 +31,7 @@
       },
       "id": 103,
       "panels": [],
-      "title": "Agent end-to-end (THE SLO: p95 /answer latency < 5s @ 10 RPS)",
+      "title": "Agent end-to-end (THE SLO: p95 /answer latency < 5s @ 10 RPS over a 5-minute window)",
       "type": "row"
     },
     {

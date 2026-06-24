@@ -71,11 +71,30 @@ Two environment fixes were needed before vLLM would start (documenting for repro
 
 ## 2. Baseline eval results (Phase 5)
 
-<!-- TODO (authoritative, on H100): regenerate results/eval_baseline.json multi-seed.
-     Report overall pass rate + per-iteration pass rate (carry-forward) + brief commentary.
-     Source material / methodology: planning/experiment-findings.md (currently Nebius, non-authoritative). -->
+**Setup.** Execution accuracy: run the agent's final SQL and the gold SQL against the target sqlite,
+compare canonicalized row sets (sorted, column-name case ignored; duplicates *not* deduped). 30 curated
+BIRD questions, agent → H100 vLLM (`Qwen/Qwen3-30B-A3B-Instruct-2507`), `MAX_ITERATIONS=3`. Harness:
+`evals/run_eval.py` → `results/eval_baseline.json`. 31 s wall clock, 0 agent errors.
 
-_To be filled from `results/eval_baseline.json` (H100). Methodology and the Nebius dry-run story are in `planning/experiment-findings.md`._
+| Metric | Value |
+|---|---|
+| Overall pass rate | **10/30 = 0.333** |
+| Per-iteration pass rate (carry-forward) | **[0.30, 0.367, 0.333]** |
+| Loop fired (≥2 iterations) | 12/30 |
+| fail→pass flips | 1 (0 regressions vs iter-0) |
+
+**Commentary — the loop does real work, but the second revise doesn't pay.** The per-iteration curve is
+**not flat** (so it is *not* the README's "architecture doing nothing" case): iter-0 `0.30` → iter-1
+`0.367`, +2 questions — the verify→revise loop earns its keep on the first revise. But the curve **peaks
+at iter-1 then dips** (`0.367 → 0.333`): the third attempt re-breaks one question that was correct after
+the first revise, so the final pass rate (`0.333`) beats iter-0 by only 1 question.
+
+**Noise caveat.** ~0.033 (one question on n=30) is the noise floor — Qwen3-30B-A3B is a mixture-of-experts
+and hosted greedy decoding is not bit-reproducible. The +1 *final* lift is within noise, but the +2
+iter-0→iter-1 jump and the non-flat shape are real signal that the loop works. The peak-then-dip strongly
+suggests **`MAX_ITERATIONS=2` is the sweet spot** — revisited as a knob in Phase 6. (Pre-H100 Nebius
+experiments exploring this — verify-sees-schema, cap depth, revise temperature — are in
+`planning/experiment-findings.md`.)
 
 ---
 

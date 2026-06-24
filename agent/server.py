@@ -7,8 +7,10 @@ The /answer endpoint accepts {question, db, tags?} and returns the
 agent's final SQL, the result rows, and per-iteration history.
 """
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
+import anyio
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 from prometheus_client import Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -39,7 +41,24 @@ if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY
     _lf_handler = CallbackHandler()
 
 
-app = FastAPI()
+def _threadpool_limit() -> int:
+    """Max threads for sync endpoints. Default 40 = Starlette's default. Raising it lets
+    more /answer runs execute concurrently - Phase-6 Iteration 4: the agent's sync handler
+    (not vLLM) was the throughput cap. Tunable via AGENT_MAX_THREADS."""
+    return int(os.environ.get("AGENT_MAX_THREADS", "40"))
+
+
+@asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    # Resize the threadpool that runs sync endpoints (the /answer handler is sync, so each
+    # in-flight request holds one thread for its whole multi-call duration).
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = _threadpool_limit()
+    logger.info("agent sync threadpool limit = %d", limiter.total_tokens)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # End-to-end /answer latency = the Phase-6 SLO metric. Buckets straddle the 5s
 # SLO boundary so histogram_quantile is accurate right where it matters.

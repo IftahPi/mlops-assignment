@@ -91,11 +91,25 @@ _To be filled from the H100 load test + tuning iterations._
 
 ## 4. Agent value (did the loop help?)
 
-<!-- TODO: one paragraph. Cite the per-iteration pass rate (carry-forward).
-     Concrete evidence available: the DISTINCT case and the 'm' vs 'M' case-sensitivity case
-     from experiment-findings.md — regenerate on H100 to make the numbers authoritative. -->
+**The verify → revise loop is wired and bounded (Phase 3).** Firing all 30 eval questions through the
+agent on the H100 (`MAX_ITERATIONS=3`):
 
-_To be filled — cite the per-iteration pass rate from the authoritative H100 eval._
+- **13/30 triggered at least one revise** — verify rejected the first attempt and the loop
+  re-generated. The textbook fix-on-loop case: `formula_1` *"coordinates of the Australian Grand Prix
+  circuit"* returned 11 duplicate rows → verify flagged the missing `DISTINCT` → revise added it →
+  re-verify passed (`generate → verify(false) → revise → verify(true)`, ends at iteration 2).
+- **9/30 exhausted the cap** — three iterations (generate + 2 revises), all three verifies `ok=false`,
+  then `route_after_verify` terminated at `iteration == MAX_ITERATIONS` instead of looping forever.
+  Concrete cap-eater: `financial` — *"the average number of crimes committed in 1995 in regions where
+  the number exceeds 4000 and the region has accounts opened from 1997"* — a multi-condition aggregate
+  the model never satisfied the verifier on. The Langfuse trace shows `execute (3/3)` and a root
+  `verify_ok=false`. This is the cap doing its job: an unfixable question costs a bounded 3 iterations,
+  not an infinite loop.
+
+<!-- TODO (Phase 5, authoritative): cite the per-iteration pass rate (carry-forward) to quantify
+     whether the loop raises ACCURACY, not just whether it fires. Source: planning/experiment-findings.md. -->
+_Whether the loop raises **accuracy** (not just fires) is the per-iteration pass rate — filled from the
+Phase 5 eval._
 
 ---
 

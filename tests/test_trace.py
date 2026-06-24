@@ -2,7 +2,7 @@
 import pytest
 
 from agent.execution import ExecutionResult
-from agent.trace import _oneline, debug_enabled, format_step, langfuse_metadata
+from agent.trace import _oneline, debug_enabled, format_run_start, format_step, langfuse_metadata
 
 
 def test_format_step_generate_includes_symbol_and_sql() -> None:
@@ -10,6 +10,13 @@ def test_format_step_generate_includes_symbol_and_sql() -> None:
     result = format_step("generate_sql", {"sql": "SELECT name FROM drivers", "iteration": 1})
     assert "🧭" in result
     assert "SELECT name FROM drivers" in result
+
+
+def test_format_run_start_includes_db_and_question() -> None:
+    """Run-start header names the db and the collapsed question, before any node runs."""
+    result = format_run_start("How many   drivers\nare there?", "formula_1")
+    assert "formula_1" in result
+    assert "How many drivers are there?" in result
 
 
 def test_format_step_verify_failure_shows_issue() -> None:

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from agent.graph import AgentState, graph  # noqa: E402
-from agent.trace import configure_logging, langfuse_metadata  # noqa: E402
+from agent.trace import configure_logging, format_run_start, langfuse_metadata, logger  # noqa: E402
 
 # Per-step trace logging in the uvicorn console (on by default; AGENT_DEBUG=0 to quiet).
 configure_logging()
@@ -56,6 +56,7 @@ def health() -> dict[str, str]:
 
 @app.post("/answer", response_model=AnswerResponse)
 def answer(req: AnswerRequest) -> AnswerResponse:
+    logger.info(format_run_start(req.question, req.db))
     state = AgentState(question=req.question, db_id=req.db)
     config: dict[str, Any] = {
         "callbacks": [_lf_handler] if _lf_handler is not None else [],

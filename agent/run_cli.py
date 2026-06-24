@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agent.graph import AgentState, graph  # noqa: E402
-from agent.trace import configure_logging  # noqa: E402
+from agent.trace import configure_logging, format_run_start, logger  # noqa: E402
 
 
 def main() -> None:
@@ -46,7 +46,8 @@ def main() -> None:
     # Configure logging based on --quiet flag (.env already loaded at import).
     configure_logging(debug=not args.quiet)
 
-    # Invoke the graph with the question and database ID
+    # Announce the run before any node executes, then invoke the graph.
+    logger.info(format_run_start(args.question, args.db))
     final = graph.invoke(AgentState(question=args.question, db_id=args.db))
 
     # Pretty-print the result

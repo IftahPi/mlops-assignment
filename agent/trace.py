@@ -50,6 +50,16 @@ def _oneline(text: str, limit: int = 120) -> str:
     return collapsed
 
 
+def format_run_start(question: str, db_id: str) -> str:
+    """Pure. One header line announcing the run, logged before any node executes.
+
+    Gives the trace a clear starting marker: which db and which question the agent
+    is about to answer, so the generate/execute/verify/revise lines that follow have
+    context.
+    """
+    return f"❓ [{db_id}] {_oneline(question)}"
+
+
 def format_step(node: str, update: dict) -> str:
     """Pure function. Maps a LangGraph node's returned update dict to one emoji-prefixed summary line.
 

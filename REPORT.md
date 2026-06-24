@@ -133,6 +133,32 @@ dashboard to locate *where* the time is *not* going. (Agent-level latency/queue 
   500s/timeouts). Textbook *"a metric improved and the SLO didn't"* — and it **confirms the bottleneck is
   agent-side queuing, not the bug.** → Iteration 2.
 
+**Iteration 2 — cut the per-request work (`MAX_ITERATIONS` 3 → 2)**
+- **saw:** with the bug fixed, p95 was 116.6 s, and the Phase-5 per-iteration eval curve peaks at
+  iter-1 then dips — i.e. the *third* attempt adds latency for essentially no accuracy.
+- **hypothesized:** each request is a chain of sequential LLM calls, so dropping the cap 3 → 2 removes
+  one generate→verify→revise round per request — less service time per run, and the peak-then-dip says
+  iteration-2 doesn't pay for itself anyway.
+- **changed:** `AGENT_MAX_ITERATIONS=2`.
+- **result:** p95 **116.6 → 76.7 s (−34%)** and success rose to **1304 / 1500 (87%)** (400s still 0).
+  **But achieved RPS was unchanged at 7.14** and we are still **~15× over the 5 s SLO.** Latency
+  improved; the *throughput ceiling did not move* — so the iteration cap is **not** the ceiling. → Iteration 3.
+
+**Iteration 3 — diagnose the ceiling: measure the uncontended floor**
+- **saw:** across baseline, Iteration 1 and Iteration 2, achieved RPS was pinned at **7.14 regardless of
+  the knob**, with p95 in the tens of seconds. A throughput ceiling that ignores tuning smells like a
+  concurrency limit — but it could equally mean each run is simply slow.
+- **hypothesized:** maybe the SLO is *architecturally impossible* — if a single agent run (a chain of
+  sequential LLM calls) already exceeds 5 s **uncontended**, no amount of tuning reaches p95 < 5 s.
+- **changed (diagnostic, not a perf change):** fired 6 real eval questions **strictly sequentially**
+  (one at a time, zero overlap) and timed each end-to-end run.
+- **result:** the floor is **0.4–1.6 s per run** — *including* the revise loop firing (iters=2) — well
+  **under** the 5 s SLO. **Hypothesis refuted:** the SLO is reachable; the 77 s p95 is **~50× queue
+  inflation, not compute.** Bottleneck localized to the **agent server**: `/answer` is a *sync*
+  endpoint, so it runs in Starlette's ~40-thread pool, capping throughput at ≈ `40 ÷ (per-run latency
+  under load) ≈ 7 RPS` while **vLLM sits idle** (KV ~22%, `waiting` 0). → Iteration 4: raise agent
+  concurrency.
+
 ---
 
 ## 4. Agent value (did the loop help?)

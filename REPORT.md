@@ -177,6 +177,40 @@ gap** — see *"Tooling: make the SLO visible"* below.
   concurrency iterations can be watched live and the before/after pair can show p95 crossing the 5 s
   line. *(This also delivers the "agent-latency instrumentation" item once parked in §5.)*
 
+**Iteration 4 — raise the agent's concurrency (threadpool 40 → 100)**
+- **saw:** the floor diagnostic (Iteration 3) showed a single run costs ~1 s while vLLM sits idle, and
+  `/answer` is a **sync** endpoint → it runs in Starlette's **40-thread pool**, so each in-flight
+  request holds a thread for its whole multi-call duration.
+- **hypothesized (stated before the run):** the binding constraint is the **agent's 40-thread pool, not
+  vLLM.** Raising it (40 → 100) will drain the agent-side queue and **drop p95 sharply.** *Falsifier:*
+  if vLLM were the real limit, raising threads would just **move the queue into vLLM** — KV → ~100%,
+  preemptions appear, `waiting` lifts off 0 — and p95 wouldn't improve.
+- **changed:** added an env-tunable threadpool limiter (`AGENT_MAX_THREADS`, lifespan hook resizing
+  anyio's `total_tokens`); ran the agent at **`AGENT_MAX_THREADS=100`**. Both runs are full 300 s @ 10
+  RPS. (This restart also activated the sharper 3 s/4 s SLO buckets.)
+- **result — the hypothesis was confirmed *and* we overshot; the answer landed in *both* columns:**
+
+  | Metric | Before (40 threads) | After (100 threads) | Δ |
+  |---|---|---|---|
+  | p50 | 54.7 s | **6.45 s** | **−88%** |
+  | **p95 (SLO)** | 67.7 s | **20.1 s** | **−70%** |
+  | p99 | 72.2 s | 26.9 s | −63% |
+  | achieved RPS | 8.33 | **8.33** | unchanged |
+  | vLLM KV cache | ~22% | **~80–100%** | saturated |
+
+  The agent threadpool **was** a major cap ✅: p50 fell 8.5×, p95 fell 3.4×, and the in-system backlog
+  collapsed from ~456 to ~54 requests (Little's law: `L = throughput × latency`). **But 100 threads
+  pushed the bottleneck *into* vLLM** 🔴 — exactly the falsifier: **KV jumped 22% → ~80–100% with
+  preemptions firing (~0.05/s)**, vLLM's own e2e latency spiked to *minutes*, and the SLO panel ran
+  flat-low (~6–20 s) for most of the window **then spiked at the end** — i.e. **100 threads is
+  *unstable*: it overshoots vLLM's KV headroom and degrades as the cache fills.** Achieved RPS stayed
+  pinned at 8.33 because the limiter is now vLLM's KV-bound capacity, not the threads. **Net: p95 cut
+  ~70% but still ~4× over the 5 s SLO — and we've relocated the ceiling from the agent to vLLM's KV
+  cache.** Before/after evidence: **screenshot 5** (before) vs **image 6** (after — KV pinned near
+  100%, preemptions visible). → Iteration 5: dial threads *down* to the no-preemption sweet spot
+  (~48–64) for a *stable* p95, and/or cut KV pressure per request (cap output tokens / lower
+  `--max-model-len`).
+
 ---
 
 ## 4. Agent value (did the loop help?)

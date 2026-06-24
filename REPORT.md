@@ -127,7 +127,11 @@ dashboard to locate *where* the time is *not* going. (Agent-level latency/queue 
   rejected with 400, and FD exhaustion surfaces as "unable to open database file".
 - **changed:** snapshot the valid-db set once at startup (`VALID_DBS`) instead of globbing on every
   request — keeps the path-traversal guard, removes the per-request filesystem dependency.
-- **result:** _<!-- fill after re-run + screenshot 2 -->_
+- **result:** the targeted metric moved — **HTTP 400s went 685 → 0** (status codes are now clean 200/500
+  only). But the **SLO did not improve; p95 rose 86.5 s → 116.6 s.** The ~685 requests formerly rejected
+  *instantly* now actually run, adding real load to the already-saturated agent queue (failures shift to
+  500s/timeouts). Textbook *"a metric improved and the SLO didn't"* — and it **confirms the bottleneck is
+  agent-side queuing, not the bug.** → Iteration 2.
 
 ---
 

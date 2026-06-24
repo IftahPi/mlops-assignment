@@ -55,17 +55,25 @@ def format_run_start(question: str, db_id: str) -> str:
 
     Gives the trace a clear starting marker: which db and which question the agent
     is about to answer, so the generate/execute/verify/revise lines that follow have
-    context. Leads with a blank line so each question's trace block is visually
+    context. Leads with two blank lines so each question's trace block is clearly
     separated from the previous one in the console.
 
     Both fields are passed through _oneline so a value containing newlines can't
-    forge extra log lines (log injection) - the only newline is the leading one.
+    forge extra log lines (log injection) - the only newlines are the two leading
+    separators.
     """
-    return f"\n❓ [{_oneline(db_id, limit=64)}] {_oneline(question)}"
+    return f"\n\n❓ [{_oneline(db_id, limit=64)}] {_oneline(question)}"
 
 
 def format_step(node: str, update: dict) -> str:
-    """Pure function. Maps a LangGraph node's returned update dict to one emoji-prefixed summary line.
+    """Pure. One emoji-prefixed summary line for a node update, led by a blank line
+    so the steps within a question are visually separated in the console.
+    """
+    return "\n" + _format_step_line(node, update)
+
+
+def _format_step_line(node: str, update: dict) -> str:
+    """Maps a LangGraph node's returned update dict to one emoji-prefixed line.
 
     Behavior by node name:
     - "generate_sql" → 🧭

@@ -26,8 +26,8 @@ def test_format_run_start_strips_newlines_from_db_id() -> None:
     db_id must be collapsed, never adding a second line.
     """
     result = format_run_start("q", "formula_1\nINFO: forged log line")
-    assert result.startswith("\n")
-    assert result.count("\n") == 1  # only the separator, none injected by db_id
+    assert result.startswith("\n\n")
+    assert result.count("\n") == 2  # only the two separators, none injected by db_id
     assert "forged log line" in result  # collapsed onto the header line, not a new one
 
 
@@ -37,6 +37,13 @@ def test_format_step_verify_failure_shows_issue() -> None:
     assert "🔎" in result
     assert "returned 0 rows" in result
     assert "ok=false" in result
+
+
+def test_format_step_leads_with_one_blank_line() -> None:
+    """Each node line is preceded by exactly one blank line (step separation)."""
+    result = format_step("verify", {"verify_ok": True})
+    assert result.startswith("\n")
+    assert result.count("\n") == 1
 
 
 def test_format_step_execute_includes_rows() -> None:

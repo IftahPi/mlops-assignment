@@ -20,10 +20,15 @@ def test_format_run_start_includes_db_and_question() -> None:
 
 
 def test_format_run_start_strips_newlines_from_db_id() -> None:
-    """A db_id containing newlines must not forge extra log lines (log injection)."""
+    """A db_id containing newlines must not forge extra log lines (log injection).
+
+    The header leads with one intentional separator newline; a newline inside
+    db_id must be collapsed, never adding a second line.
+    """
     result = format_run_start("q", "formula_1\nINFO: forged log line")
-    assert "\n" not in result
-    assert "forged log line" in result  # collapsed onto the single header line, not a new one
+    assert result.startswith("\n")
+    assert result.count("\n") == 1  # only the separator, none injected by db_id
+    assert "forged log line" in result  # collapsed onto the header line, not a new one
 
 
 def test_format_step_verify_failure_shows_issue() -> None:

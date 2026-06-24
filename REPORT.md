@@ -104,10 +104,11 @@ experiments exploring this — verify-sees-schema, cap depth, revise temperature
 run). The SLO metric's source of truth is the load driver (`load_test/driver.py`), which times the full
 `/answer` round-trip.
 
-**Observability gap (a finding in itself):** the Grafana dashboard instruments **vLLM only** —
-per-LLM-call latency, KV, queue. It has **no panel for end-to-end agent latency**, so it confirms
-serving health but cannot display the SLO metric. We therefore read the SLO off the driver and use the
-dashboard to locate *where* the time is *not* going. (Agent-level latency/queue instrumentation → §5.)
+**Observability gap (a finding in itself):** the Grafana dashboard *initially* instrumented **vLLM
+only** — per-LLM-call latency, KV, queue. It had **no panel for end-to-end agent latency**, so it
+confirmed serving health but could not display the SLO metric. We *initially* read the SLO off the
+driver and used the dashboard only to locate *where* the time is *not* going. **We later closed this
+gap** — see *"Tooling: make the SLO visible"* below.
 
 **Baseline (MAX_ITERATIONS=3, + the db bug, 10 RPS, 150 s):**
 - p95 **86.5 s** (p50 29.9 s, p99 95.9 s, max 117.9 s) — **~17× over the 5 s SLO.**
@@ -158,6 +159,23 @@ dashboard to locate *where* the time is *not* going. (Agent-level latency/queue 
   endpoint, so it runs in Starlette's ~40-thread pool, capping throughput at ≈ `40 ÷ (per-run latency
   under load) ≈ 7 RPS` while **vLLM sits idle** (KV ~22%, `waiting` 0). → Iteration 4: raise agent
   concurrency.
+
+**Tooling (between Iterations 3 and 4) — make the SLO visible (close the observability gap)**
+- **saw:** every iteration's verdict so far was read off the **load driver's** client-side percentiles,
+  because the Grafana dashboard instrumented **vLLM only** — the metric we actually grade against (p95
+  end-to-end `/answer` latency) had **no panel**. During a run we could see vLLM was *idle* but not the
+  agent-side number we were chasing; we were effectively blind to the SLO on the dashboard.
+- **changed:** instrumented the agent server with a Prometheus histogram
+  `agent_request_duration_seconds` (buckets straddling the SLO: …2, **3, 4, 5**, 10…), exposed a
+  `/metrics` endpoint, added a Prometheus scrape job for the agent (`:8001`), and added a Grafana panel
+  *"Agent end-to-end latency (the SLO)"* — p50/p95/p99 with a red 5 s threshold line — pinned to the top
+  of the dashboard.
+- **result:** the SLO is now a **first-class, live** panel, verified end-to-end (a 5-request smoke
+  produced a queryable p95). The **driver stays the source of truth** — the panel's `histogram_quantile`
+  is a bucket-interpolated *approximation* (with only a few samples it reads high; the 3 s/4 s buckets
+  sharpen it near the boundary) — but the dashboard now shows the SLO in real time, so the remaining
+  concurrency iterations can be watched live and the before/after pair can show p95 crossing the 5 s
+  line. *(This also delivers the "agent-latency instrumentation" item once parked in §5.)*
 
 ---
 

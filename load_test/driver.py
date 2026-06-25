@@ -27,13 +27,29 @@ DEFAULT_OUT = ROOT / "results" / "load_test.json"
 AGENT_URL_DEFAULT = "http://localhost:8001/answer"
 
 
+def _parse_tags(pairs: list[str]) -> dict[str, str]:
+    """Turn ['run=final', 'rps=10'] CLI values into {'run': 'final', 'rps': '10'}."""
+    tags: dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            raise SystemExit(f"--tag must be KEY=VALUE, got: {pair!r}")
+        tags[key] = value
+    return tags
+
+
 async def fire_one(
     session: aiohttp.ClientSession,
     url: str,
     question: dict,
     results: list[dict],
+    tags: dict[str, str],
 ) -> None:
-    payload = {"question": question["question"], "db": question["db_id"]}
+    payload: dict = {"question": question["question"], "db": question["db_id"]}
+    if tags:
+        # Forwarded to the agent, which records them as filterable Langfuse trace
+        # tags (run:..., rps:...) so a Phase-6 load run is segmentable in the UI.
+        payload["tags"] = tags
     t0 = time.monotonic()
     status = "ok"
     err: str | None = None
@@ -62,6 +78,7 @@ async def drive(args: argparse.Namespace) -> None:
     if not questions:
         raise SystemExit(f"{PERF_POOL} is empty")
 
+    tags = _parse_tags(args.tag)
     rnd = random.Random(0)
     results: list[dict] = []
     interval = 1.0 / args.rps
@@ -74,7 +91,7 @@ async def drive(args: argparse.Namespace) -> None:
         next_fire = start
         while time.monotonic() < deadline:
             q = rnd.choice(questions)
-            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results)))
+            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results, tags)))
             next_fire += interval
             sleep_for = next_fire - time.monotonic()
             if sleep_for > 0:
@@ -120,6 +137,9 @@ def main() -> None:
     p.add_argument("--duration", type=int, default=300, help="seconds to drive load")
     p.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    p.add_argument("--tag", action="append", default=[], metavar="KEY=VALUE",
+                   help="repeatable; attaches a Langfuse trace tag to every request "
+                        "(e.g. --tag run=final --tag rps=10)")
     args = p.parse_args()
     asyncio.run(drive(args))
 

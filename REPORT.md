@@ -32,15 +32,20 @@ exec uv run python -m vllm.entrypoints.openai.api_server \
 
 ### Changes from the example script
 
-The shipped `start_vllm.sh` launched with only `--model`, `--host`, `--port`. I added three flags:
+The shipped `start_vllm.sh` launched with only `--model`, `--host`, `--port`. I added three flags — each
+chosen for *this* workload (1.5–3K-token prompts, short SQL outputs, ~3 dependent calls/request, on a
+memory-bound MoE) — and deliberately kept one default (prefix caching) on:
 
-| Flag | Value | Justification |
+| Flag | Value | One-line rationale (MoE / prompt-shape / latency) |
 |---|---|---|
-| `--max-model-len` | `32768` | **Required to start at all.** The model's native context is 262,144 tokens; vLLM sizes the KV cache to `max-model-len`, and at 262K that allocation exceeds 80 GB and vLLM refuses to start. 32K fits comfortably and is far more than text-to-SQL needs (schema + question + SQL is a few thousand tokens). |
-| `--gpu-memory-utilization` | `0.90` | Use up to 90% of the 80 GB for weights + KV cache. Matches vLLM's default; set explicitly so the config is self-documenting. Verified at runtime: **74.4 GB used ≈ 0.90 × 80 GB**. |
-| `--max-num-batched-tokens` | `32768` | Per-scheduler-step token budget. Set equal to `max-model-len` so one full-length prompt prefills in a single step; also bounds batch size for the Phase 6 load test. **A knob I expect to revisit during SLO tuning.** |
+| `--max-model-len` | `32768` | **Prompt-shape:** prompts are ~1.5–3K tokens + short SQL out, so 32K is generous headroom — *not* the native 262K, whose KV-cache allocation exceeds 80 GB and won't boot. A smaller cap = less KV per sequence → more concurrent sequences, which is the Phase-6 SLO lever. |
+| `--gpu-memory-utilization` | `0.90` | **MoE memory:** all 30B experts stay resident (~57 GB BF16) though only ~3B activate per token, so VRAM — not FLOPs — is the bottleneck. 0.90 hands the largest safe share to the KV cache (max concurrency), keeping 0.10 for activation spikes. Verified: **74.4 GB ≈ 0.90 × 80 GB**. |
+| `--max-num-batched-tokens` | `32768` | **Latency/TTFT:** set equal to `max-model-len` so any single prompt prefills in one chunked-prefill step (no split-prefill TTFT penalty), while still bounding per-step batch size under load. Revisited as a knob in Phase 6. |
+| *prefix caching* | *on (kept default)* | **Prompt-shape:** every request shares the system + schema prefix for a given `db_id`; automatic prefix caching is left on deliberately and measured a **~52% hit rate** (§3), cutting prefill — the dominant cost for these short prompts. |
 
-No quantization and no tensor parallelism (single H100 → TP=1, full BF16 weights). Model id, host, and port unchanged.
+No quantization and no tensor parallelism: a single H100 fits the MoE in full BF16, so TP=1 (avoids
+all-reduce latency) and no quantization (spend the spare memory on KV / answer quality, not weight
+compression). Model id, host, and port unchanged.
 
 ### Prerequisites outside the launch script
 
@@ -103,6 +108,14 @@ experiments exploring this — verify-sees-schema, cap depth, revise temperature
 **SLO:** p95 end-to-end **agent** latency < 5 s at 10 RPS over a 5-minute window (1 RPS = 1 full agent
 run). The SLO metric's source of truth is the load driver (`load_test/driver.py`), which times the full
 `/answer` round-trip.
+
+**Tracing the load runs (Phase 4 tags, actually used here).** The driver tags every request it fires —
+`load_test/driver.py --tag run=<name> --tag rps=<n>` — and the agent forwards those as **filterable
+Langfuse trace tags** (`run:…`, `rps:…`, via `langfuse_metadata()` → `langfuse_tags`). That turns each
+Phase-6 run into a selectable slice of the trace list, so the `generate_sql → verify → revise` waterfall
+for one specific load run can be isolated and read next to its dashboard window (verified: a tagged burst
+produced 45 traces filterable by `run:smoke-tags`). Evidence: `screenshots/langfuse_tags.png` (tag chips +
+left-rail filter) and `screenshots/langfuse_trace.png` (the verify→revise waterfall).
 
 **Observability gap (a finding in itself):** the Grafana dashboard *initially* instrumented **vLLM
 only** — per-LLM-call latency, KV, queue. It had **no panel for end-to-end agent latency**, so it

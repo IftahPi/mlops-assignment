@@ -224,6 +224,53 @@ gap** — see *"Tooling: make the SLO visible"* below.
   the 40 that under-uses vLLM and the 100 that saturates it) for a *stable* p95, and/or cut KV pressure
   per request (cap generation `max_tokens` / `--max-num-seqs`) to raise that knee.
 
+**Iteration 5 — kill the preemptions: cap admission + generation (KV levers)**
+- **saw:** Iteration 4 hit p95 20.1 s but *unstable* — vLLM KV pinned ~80–100% with preemptions firing
+  and a tail that spiked late in the window. The instability, not the agent, was now the problem.
+- **hypothesized (stated before the run):** the late-window spike is **KV-preemption thrash**. Bounding
+  KV two ways — admission (`--max-num-seqs 64`, so vLLM never tries to co-run more sequences than it has
+  comfortable headroom for) and decode (`AGENT_MAX_TOKENS=512`, so no runaway generation hogs KV) — plus
+  backing threads off 100 → **70**, will hold **KV below ~75%, preemptions ≈ 0, and a *stable* p95**.
+  *Falsifier:* if admission-capping just relocates the backlog from vLLM's run-queue into its *waiting*
+  queue, preemptions vanish but tail latency does **not** improve (queueing delay replaces preemption).
+- **changed:** `--max-num-seqs 64` (`scripts/start_vllm.sh`), `AGENT_MAX_TOKENS=512` wired into the
+  `llm()` factory (`agent/graph.py`), agent run at `AGENT_MAX_THREADS=70`. One coordinated step, full
+  300 s @ 10 RPS. (Committed `4e314fa`.)
+- **result — the falsifier fired: hypothesis confirmed *on its own terms* but the SLO regressed:**
+
+  | Metric | Iter 4 (threads 100, no KV cap) | Iter 5 (threads 70, max-seqs 64, max-tok 512) | Δ |
+  |---|---|---|---|
+  | p50 | 6.45 s | 7.09 s | +10% |
+  | **p95 (SLO)** | **20.1 s** | **30.3 s** | **+50% (worse)** |
+  | p99 | 26.9 s | 36.6 s | +36% |
+  | achieved RPS | 8.33 | **9.19** | **+10%** |
+  | vLLM preemptions | many (KV 80–100%) | **0** (KV bounded) | ✅ eliminated |
+  | ok / http-500 | 2571 / 372 | 2583 / 376 | unchanged |
+
+  The KV lever **did exactly what it promised** ✅: **preemptions → 0**, KV no longer saturates, and
+  goodput actually *rose* (8.33 → **9.19 RPS** — no preempt-recompute waste, so every admitted token is
+  useful work). **But the SLO got *worse*** 🔴: p95 20→30 s. The falsifier was right — capping admission
+  at 64 didn't remove the backlog, it **moved it from vLLM's *preempting* run-queue into its *waiting*
+  queue**, and the admission queue at 64 is a *deeper* wait than the unbounded-but-preempting regime. **We
+  traded preemption thrash for a longer queueing delay, and the queueing delay was bigger.** Evidence:
+  **screenshot 7** (KV flat and well off 100%, preemptions panel flat at 0 — visibly stable, yet the SLO
+  panel higher than image 6).
+
+  **An honest aside on the 12.5% HTTP-500s.** They are **not** an Iteration-5 regression: Iter 4 already
+  had **372** and Iter 5 has **376**, spread *evenly* across the run (not a startup artifact). The agent
+  surfaces them from `graph.invoke` → `HTTPException(500)` (`server.py:116`); under sustained ~70-way
+  concurrency the LLM client errors out (httpx pool / vLLM API-server connection pressure at 70 threads ×
+  3 sequential calls), independent of the KV levers. **This is the next thing to chase** — see §5.
+
+  **Verdict on Phase 6.** Across five iterations p95 fell **86 s → ~20–30 s** (and the system is now
+  *stable* — preemptions gone), but the **5 s SLO @ 10 RPS is not reachable by tuning alone**: this
+  workload is **3 sequential LLM calls per request**, vLLM tops out near **8–9 RPS** of that, and the
+  remaining latency is *queueing for the model*, not agent overhead. The two regimes we can pick between
+  are now clear — **Iter 4 (unstable, lower p95)** vs **Iter 5 (stable, higher p95, higher goodput)** —
+  and neither is a config away from 5 s. Closing the gap needs an **architectural** change: **fewer LLM
+  calls per request** (the dominant lever — fold verify into generate, or only revise on a real execution
+  error), async pipelining, a smaller/faster model, or speculative decoding. → §5.
+
 ---
 
 ## 4. Agent value (did the loop help?)

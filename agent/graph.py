@@ -42,11 +42,6 @@ GENERATE_TEMPERATURE = float(os.environ.get("AGENT_GENERATE_TEMPERATURE", "0.0")
 VERIFY_TEMPERATURE = float(os.environ.get("AGENT_VERIFY_TEMPERATURE", "0.0"))
 REVISE_TEMPERATURE = float(os.environ.get("AGENT_REVISE_TEMPERATURE", "0.2"))
 
-# Cap generation length. SQL + a short verify verdict are well under this; the cap exists to
-# bound worst-case decode KV per sequence (a runaway no-EOS generation would otherwise hog KV
-# and push vLLM toward preemption under load). Phase-6 Iteration 5 KV lever; env-tunable.
-MAX_TOKENS = int(os.environ.get("AGENT_MAX_TOKENS", "512"))
-
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
 # vLLM ignores the key, but a hosted OpenAI-compatible provider needs a real one.
@@ -76,7 +71,6 @@ def llm(temperature: float = 0.0) -> ChatOpenAI:
         base_url=VLLM_BASE_URL,
         api_key=LLM_API_KEY,
         temperature=temperature,
-        max_tokens=MAX_TOKENS,
     )
 
 

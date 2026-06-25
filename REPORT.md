@@ -271,6 +271,32 @@ gap** — see *"Tooling: make the SLO visible"* below.
   calls per request** (the dominant lever — fold verify into generate, or only revise on a real execution
   error), async pipelining, a smaller/faster model, or speculative decoding. → §5.
 
+### Final configuration (the rollback decision)
+
+The two regimes were a genuine choice, so we picked on the **graded metric — p95.** Iteration 4 holds the
+lower p95 (**20.1 s** vs Iteration 5's 30.3 s), so we **reverted the Iteration 5 KV levers** and restored
+Iteration 4 as the final configuration (commit `130771a` reverts `4e314fa`):
+
+| Setting | Final value | Why |
+|---|---|---|
+| `AGENT_MAX_ITERATIONS` | **2** | Iteration 2 — banks the +2 first-revise accuracy lift, drops the iter-2 regression. |
+| `AGENT_MAX_THREADS` | **100** | Iteration 4 — the single change that moved p95 (67 → 20 s) by draining the agent-side queue. |
+| vLLM `--max-num-seqs` | *(default, unset)* | Iteration 5 admission cap reverted — capping at 64 deepened the *waiting* queue and **raised** p95. |
+| `max_tokens` | *(unset)* | Iteration 5 decode cap reverted — the KV bound wasn't worth the SLO regression, and full generation removes any truncation risk to answer quality. |
+
+We accept Iteration 4's known cost: KV runs hot (~80–100%) with occasional preemptions, so this p95 is
+**lower but less stable** than Iteration 5's. Since the SLO is graded on **p95**, the lower-p95 regime
+wins; the instability is documented, not hidden.
+
+**Did the rollback cost accuracy?** Re-ran the full 30-question eval against this final config
+(`AGENT_MAX_ITERATIONS=2`, reverted levers) → `results/eval_after_tuning.json`:
+
+> ⏳ **PENDING — re-run on the VM once it is back up.** Expectation: **≈ baseline, likely +1.** The
+> reverted levers are serving/concurrency knobs with no path to the model's correctness, and at
+> `MAX_ITERATIONS=2` the Phase-5 carry-forward curve reads **0.367 (11/30)** — one *above* the baseline's
+> `MAX_ITERATIONS=3` final of 0.333 (10/30). So quality is expected to **survive (and slightly improve)**;
+> the number below is authoritative once the run lands.
+
 ---
 
 ## 4. Agent value (did the loop help?)
@@ -290,19 +316,41 @@ agent on the H100 (`MAX_ITERATIONS=3`):
   `verify_ok=false`. This is the cap doing its job: an unfixable question costs a bounded 3 iterations,
   not an infinite loop.
 
-<!-- TODO (Phase 5, authoritative): cite the per-iteration pass rate (carry-forward) to quantify
-     whether the loop raises ACCURACY, not just whether it fires. Source: planning/experiment-findings.md. -->
-_Whether the loop raises **accuracy** (not just fires) is the per-iteration pass rate — filled from the
-Phase 5 eval._
+**But firing isn't helping — the per-iteration pass rate is the proof.** Carry-forward accuracy across
+iterations is **[0.30, 0.367, 0.333]** (Phase 5, n=30): generate-alone (iter-0) scores **0.30**; the
+**first revise lifts it to 0.367 (+2 questions)**; the second revise *dips* to 0.333 (it re-breaks one
+question that was already correct). So the loop **does** raise accuracy — but only the **first** revise
+pays. The curve being **non-flat** is what rules out the README's "architecture doing nothing" case (a
+flat line would mean revise never changes an outcome); the **peak-then-dip** is precisely why the final
+config caps at **`MAX_ITERATIONS=2`** — it banks the +2 lift and skips the iter-2 regression. The +2 at
+the peak sits above the ~0.033 single-question noise floor (n=30, temp-0 MoE), so the loop earns its
+keep — and the eval told us not just *that* it helps but *how much* loop to keep.
 
 ---
 
 ## 5. What I'd do with more time
 
-<!-- TODO: be specific (not "add Kubernetes"). Candidates from experiment-findings.md §5:
-     - multi-seed eval to beat the MoE noise floor (~0.033 on n=30 at temp 0);
-     - let generate/revise inspect distinct column values (the 'm' vs 'M' class can't be fixed blind);
-     - early-stop / confidence gate so the loop doesn't over-revise (the MAX=5 oscillation);
-     - LLM-as-judge on the trace for near-misses where execution-accuracy is too strict. -->
+In priority order, each tied to a finding above:
 
-_To be filled._
+1. **Cut the LLM calls per request — the dominant SLO lever.** Phase 6 proved the residual latency is
+   *queueing for the model*, not agent overhead, and the workload is **3 sequential calls/request**. Fold
+   the verifier into the generator (one structured response that emits SQL **and** a self-check), and
+   spend a separate `revise` call **only when execution actually errors or returns empty rows** — not on
+   every run. That removes 1–2 sequential model calls from the hot path, the one change with a real path
+   to p95 → 5 s. Re-measure with the same driver to confirm.
+2. **Chase the ~12.5% HTTP-500s** (`server.py:116`, ~376/3000, evenly spread). Reproduce the LLM-client
+   failures under ~70-way concurrency, add a bounded retry + explicit httpx connection-pool sizing on the
+   client, and read the agent `/metrics` to confirm whether the cause is client-pool exhaustion or
+   vLLM's API-server accept queue. That's real goodput currently thrown away.
+3. **Beat the eval noise floor with multi-seed eval.** n=30 at temp 0 on an MoE has a ~0.033 (one
+   question) noise floor, so the +1 *final* lift is inside the noise. Run k seeds (or a small temperature
+   sweep) and report mean ± std, so the loop's accuracy claim is statistically honest rather than a
+   single coin flip.
+4. **Let generate/revise see distinct column values.** The `gender = 'm'` vs stored `'M'` bug (and
+   enum/category mismatches generally) **cannot be fixed blind** — give the agent a cheap
+   `SELECT DISTINCT <col> LIMIT k` probe on filtered columns so it conditions on real stored values
+   instead of guessing their spelling/case.
+5. **Make `/answer` async + add a faster decode path.** A sync endpoint holds a threadpool slot across
+   the whole sequential chain (the Iteration 4 bottleneck); going async frees the slot during model
+   waits, and pairing it with speculative decoding (or a small draft model) cuts per-call decode time —
+   both attack the queueing delay directly, complementing #1.

@@ -1,8 +1,14 @@
 # RESUME — 2026-06-25 (Module 3 MLOps assignment, Phases 6–7 wrap-up)
 
-**One-line status:** Phases 1–5 done. Phase 6 tuning complete and **reverted to the final
-configuration**. Phase 7 report 95% written. **The only work left is blocked on the VM being down** —
-one eval run + slotting one number into REPORT + zipping. Everything else is committed.
+**✅ UPDATE 2026-06-25 ~20:35 — ALL COMPLETE.** VM came back up (`89.169.124.183`). Ran the final-config
+eval → `results/eval_after_tuning.json` = **0.400 (12/30)**, per-iter **[0.333, 0.400]** (vs baseline
+0.333 / 10/30 — **quality survived, +2**). REPORT pending block filled (commit `bfb7bf0`). Submission zip
+built: `../iftah_piasetzky_mlops_assignment_2.zip` (2.0 MB, 80 files, no secrets/data/venv, all 14
+deliverables verified). Nothing left to run. (History below kept for reference.)
+
+**One-line status (at time of writing, now superseded):** Phases 1–5 done. Phase 6 tuning complete and
+**reverted to the final configuration**. Phase 7 report 95% written. The only work left was blocked on the
+VM being down — one eval run + slotting one number into REPORT + zipping. Everything else committed.
 
 Authoritative context lives in:
 - `REPORT.md` — the graded writeup (read it; it's near-final).

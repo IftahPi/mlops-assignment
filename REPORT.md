@@ -288,14 +288,22 @@ We accept Iteration 4's known cost: KV runs hot (~80–100%) with occasional pre
 **lower but less stable** than Iteration 5's. Since the SLO is graded on **p95**, the lower-p95 regime
 wins; the instability is documented, not hidden.
 
-**Did the rollback cost accuracy?** Re-ran the full 30-question eval against this final config
-(`AGENT_MAX_ITERATIONS=2`, reverted levers) → `results/eval_after_tuning.json`:
+**Did the rollback cost accuracy? No — it improved.** Re-ran the full 30-question eval against this final
+config (`AGENT_MAX_ITERATIONS=2`, reverted levers, agent → H100 vLLM) → `results/eval_after_tuning.json`
+(41.5 s wall, 0 agent errors):
 
-> ⏳ **PENDING — re-run on the VM once it is back up.** Expectation: **≈ baseline, likely +1.** The
-> reverted levers are serving/concurrency knobs with no path to the model's correctness, and at
-> `MAX_ITERATIONS=2` the Phase-5 carry-forward curve reads **0.367 (11/30)** — one *above* the baseline's
-> `MAX_ITERATIONS=3` final of 0.333 (10/30). So quality is expected to **survive (and slightly improve)**;
-> the number below is authoritative once the run lands.
+| | Baseline (pre-tuning, `MAX_ITERATIONS=3`) | **Final config** (`MAX_ITERATIONS=2`, reverted) |
+|---|---|---|
+| Overall pass rate | 0.333 (10/30) | **0.400 (12/30)** |
+| Per-iteration (carry-forward) | [0.30, 0.367, 0.333] | **[0.333, 0.400]** |
+
+**Quality survived — it rose +2 questions (0.333 → 0.400).** This is the Phase-5 prediction playing out:
+the loop's *first* revise still earns its keep (iter-0 0.333 → iter-1 **0.400, +2**), and capping at
+`MAX_ITERATIONS=2` banks that lift while dropping baseline's iter-2 regression. The reverted KV levers
+were pure serving/concurrency knobs with no path to correctness (if anything, removing the 512-token cap
+eliminates a truncation risk), so latency stability changed but accuracy did not suffer. The +2 sits just
+above the ~0.033 single-question MoE noise floor, so the honest read is **quality held and modestly
+improved, with zero regression** from the Phase-6 tuning.
 
 ---
 
